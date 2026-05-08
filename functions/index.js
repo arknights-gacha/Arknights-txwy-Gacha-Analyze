@@ -32,6 +32,12 @@ app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, '../public'))); // Serving CSS logic
 
+// Set canonical URL for SEO indexing
+app.use((req, res, next) => {
+    let path = req.originalUrl.split('?')[0]; // Ignore query strings for canonical purposes
+    res.locals.canonicalUrl = `https://arknights-txwy-gacha.web.app${path}`;
+    next();
+});
 
 // Basic session using a cookie (cookie-parser and basic token can be better, but we will use a simple UID cookie for this example app to replace Flask Session)
 const cookieParser = require('cookie-parser');
