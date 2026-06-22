@@ -161,7 +161,7 @@ function classifyPool(poolId) {
 }
 
 function analyzeLogs(logs) {
-    let logsCopy = JSON.parse(JSON.stringify(logs));
+    let logsCopy = logs;
     logsCopy.reverse();
     
     let n = logsCopy.length;
