@@ -178,4 +178,4 @@ app.get('/logout', (req, res) => {
 });
 
 // Export the Express app as a Firebase Function (HTTP), set region to Taiwan and restrict maxInstances for cost control
-exports.app = onRequest({ region: "asia-east1", invoker: "public", maxInstances: 10, memory: "512MiB" }, app);
+exports.app = onRequest({ region: "asia-east1", invoker: "public", maxInstances: 20, concurrency: 40, memory: "512MiB" }, app);
