@@ -275,12 +275,13 @@
         <div class="wYL2n2 Mric6f"></div>
         <div class="Xo6v7v">
           <div style="line-height: 1.6; color: #ccc; margin-bottom: 0.5rem;">
-            本站是一個專為《明日方舟》繁中服（台服）玩家量身打造的<strong>抽卡紀錄導出、分析與視覺化統計工具</strong>。您可以從官方網站獲取您的抽卡歷史紀錄，或將過去的紀錄導入本站，支持資料從匯入、獲取、合併、暫存、匯出備份的一條龍服務。
+            本站是一個專為《明日方舟》繁中服（台服）玩家量身打造的<strong>抽卡紀錄分析工具</strong>。
           </div>
           <div style="line-height: 1.6; color: #ccc;">
             <strong>主要功能與特色包含：</strong><br>
             • <strong>統計分析</strong>：自動計算各卡池（標準、中堅、限定）的已墊保底抽數、平均出金機率，並提供色彩豐富的分佈圖表。<br>
-            • <strong>資料管理</strong>：獲取紀錄後您可以隨時以 JSON 格式匯入、匯出、備份、覆蓋、清除，保障您的資料安全。<br>
+            • <strong>資料管理</strong>：獲取紀錄後您可以隨時以 JSON 格式匯入、匯出、備份、覆蓋、清除。<br>
+            • <strong>資料安全</strong>：支援資料上鎖／解鎖，保障您在本站的抽卡紀錄不被他人存取或更改。<br>
             • <strong>跨平台支援</strong>：可透過多種登入方式（網頁、插件、APP、JSON 匯入、UID 查詢）輕鬆更新、查看您的數據。<br>
           </div>
         </div>
@@ -296,13 +297,12 @@
         <div class="wYL2n2 m8kOmo"></div>
         <div class="wYL2n2 Mric6f"></div>
         <div class="Xo6v7v">
-          <div>1：本網站不保證任何資料的正確性或完整性，本網站可能清除任意紀錄且不另行通知，請經常將紀錄導出備份。</div>
+          <div>1：本網站不保證任何資料的正確性或完整性，本網站非必要不會清除任意紀錄，但若清除則不另行通知，請經常導出備份。</div>
           <div>2：若有刪除紀錄的需求，可使用「方法三：上傳 JSON」功能上傳空白檔案。</div>
-          <div>3：請注意，由於方法二的存在，任何人都可以藉由你的 UID 訪問這裡的紀錄，若有顧慮請在完成獲取後及時刪除。</div>
-          <div>4：請注意，由於方法三的存在，任何人都可以藉由你的 UID 覆蓋這裡的紀錄，請在查詢完成後及時備份資料。</div>
-          <div>5：如需在查詢過程中合併過去備份的紀錄，請先使用「方法三：上傳 JSON」功能，將過往的 visit_logs.json 檔案上傳，登出後再使用任一方式獲取。「方法二：Existing ID 登入」亦可用於檢查過往紀錄是否存在或完整。</div>
-          <div>6：本網站不會保留您的 Cookie 或 Token，不過，為避免任何風險，建議在完成獲取後前往<a href="https://user.gryphline.com/clearState" target="_blank">官網用戶中心</a>依指示清除快取。</div>
-          <div>7：使用擴充功能獲取的驗證資訊（Cookie 與 Token）僅作為單次連線向官方伺服器調閱抽卡紀錄之過渡憑證。此憑證在伺服器用畢後即刻銷毀，絕不持久化儲存於任何資料庫中。</div>
+          <div>3：若紀錄未上鎖，任何人都可以藉由您的 UID 使用方法二、三訪問或覆蓋這裡的紀錄，若有顧慮請鎖定您的資料。</div>
+          <div>4：在詳情頁點擊「資料上鎖」，完成帳號登入後即可鎖定紀錄，鎖定後使用方法二、三時將被提示登入帳號，藉方法一等官方來源進行資料獲取者則不受資料鎖定限制，若因忘記帳密等原因導致無法登入，請向專案Github提出<a href="https://github.com/arknights-gacha/Arknights-txwy-Gacha-Analyze/issues" target="_blank">issue</a>以尋求協助。</div>
+          <!-- <div>5：如曾清除本站的紀錄，可使用「方法三：上傳 JSON」功能，將過往的 visit_logs.json 檔案上傳，登出後再使用任一方式獲取即可合併。「方法二：Existing ID 登入」亦可用於檢查本站紀錄的狀態。</div> -->
+          <div>5：本網站不會保留您的 Cookie 或 Token，更多詳情可見<a href="/privacy">隱私權政策</a>。</div>
         </div>
       </div>
     </div>
@@ -423,6 +423,14 @@
                   if (res.redirected) {
                       window.location.href = res.url;
                   } else if (res.ok) {
+                      const contentType = res.headers.get("content-type");
+                      if (contentType && contentType.indexOf("text/html") !== -1) {
+                          const html = await res.text();
+                          document.open();
+                          document.write(html);
+                          document.close();
+                          return;
+                      }
                       window.location.href = '/';
                   } else {
                       const errorText = await res.text();

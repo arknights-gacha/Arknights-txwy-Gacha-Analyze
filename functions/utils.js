@@ -27,8 +27,7 @@ async function getUid(roleToken = '', userCookie = '') {
     const js = response.data;
     
     // add a timestamp
-    js.data.lastFetched = formatDateTime(Math.floor(Date.now() / 1000));
-    js.data.ts = Math.floor(Date.now() / 1000);
+    js.data.lastFetched = Math.floor(Date.now() / 1000);
     
     if (js.code !== 0) {
         throw new Error(`API code=${js.code}`);

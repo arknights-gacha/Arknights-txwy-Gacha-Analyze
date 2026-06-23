@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>授權驗證 - 明日方舟繁中服尋訪紀錄分析</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="stylesheet" href="/css/your.css" />
+    <style>
+      .login-wrapper {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+        padding: 2rem;
+      }
+      .login-box {
+        background: #121212;
+        padding: 2rem;
+        border-radius: 0.5rem;
+        width: 100%;
+        max-width: 25rem;
+        text-align: center;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      }
+      .submit-btn {
+        width: 100%;
+        padding: 0.75rem;
+        background: #10d1fe;
+        border: none;
+        border-radius: 0.25rem;
+        font-weight: bold;
+        color: #000;
+        cursor: pointer;
+        margin-top: 1rem;
+        font-size: 1.1rem;
+      }
+      .back-btn {
+        display: block;
+        margin-top: 1.5rem;
+        color: #10d1fe;
+        text-decoration: none;
+      }
+      .info-text {
+        color: #e0e0e0;
+        margin-bottom: 1.5rem;
+        line-height: 1.6;
+        font-size: 1.05rem;
+      }
+    </style>
+    <script defer src="/__/firebase/10.7.0/firebase-app-compat.js"></script>
+    <script defer src="/__/firebase/10.7.0/firebase-auth-compat.js"></script>
+    <script defer src="/__/firebase/init.js"></script>
+    <script defer>
+      window.addEventListener('DOMContentLoaded', () => {
+        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+          firebase.auth().useEmulator('http://' + window.location.hostname + ':9099');
+        }
+      });
+    </script>
+  </head>
+  <body class="dark-mode" style="background-color: #000000; color: #e0e0e0">
+    <div class="login-wrapper">
+      <div class="login-box">
+        <h2 style="color: #10d1fe; margin-top: 0; margin-bottom: 1.5rem;">資料已上鎖</h2>
+        
+        <% if (typeof flash !== 'undefined' && flash) { %>
+          <div style="background: rgba(255, 68, 68, 0.2); color: #ff4444; padding: 0.75rem; border-radius: 0.25rem; margin-bottom: 1.5rem; border: 1px solid #ff4444;">
+            <%= flash %>
+          </div>
+        <% } %>
+
+        <div class="info-text">
+          此 ID 的紀錄已被持有者鎖定。<br>
+          請透過 Google 帳號進行身分驗證以確認授權。
+        </div>
+
+        <button onclick="signInAndVerify()" class="submit-btn" id="authBtn">
+          使用 Google 帳號登入
+        </button>
+
+        <a href="/login" class="back-btn">返回首頁</a>
+      </div>
+    </div>
+
+    <!-- Hidden data -->
+    <script>
+      const method = <%- JSON.stringify(method || 'reauth') %>;
+      const uid = <%- JSON.stringify(uid) %>;
+      const logsPayload = <%- typeof logs !== 'undefined' && logs ? JSON.stringify(logs).replace(/</g, '\\u003c') : 'null' %>;
+
+      async function signInAndVerify() {
+        const btn = document.getElementById('authBtn');
+        btn.disabled = true;
+        btn.innerText = '驗證中...';
+        
+        try {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            const result = await firebase.auth().signInWithPopup(provider);
+            const idToken = await result.user.getIdToken();
+            
+            const response = await fetch('/login_locked', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    idToken: idToken,
+                    uid: uid,
+                    method: method,
+                    logs: logsPayload
+                })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                window.location.href = data.redirect || '/';
+            } else {
+                alert('驗證失敗：' + (data.error || '不明錯誤'));
+                btn.disabled = false;
+                btn.innerText = '使用 Google 帳號登入';
+            }
+        } catch (error) {
+            console.error('Auth Error:', error);
+            if (error.code !== 'auth/popup-closed-by-user') {
+                alert('身分驗證失敗：' + (error.message || error));
+            }
+            btn.disabled = false;
+            btn.innerText = '使用 Google 帳號登入';
+        }
+      }
+    </script>
+  </body>
+</html>

@@ -24,7 +24,8 @@ const rateLimit = require('express-rate-limit');
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100, // Limit each IP to 100 requests per windowMs
-  message: '存取過於頻繁，請稍後再試。'
+  message: '存取過於頻繁，請稍後再試。',
+  skip: (req, res) => process.env.FUNCTIONS_EMULATOR === 'true'
 });
 app.use(limiter);
 
@@ -44,10 +45,20 @@ const cookieParser = require('cookie-parser');
 app.use(cookieParser('firebase-arknights-secret'));
 
 app.get('/', async (req, res) => {
-    const uid = req.signedCookies.__session;
-    if (!uid) {
+    let sessionData = req.signedCookies.__session;
+    
+    // Backward compatibility for old string cookies
+    if (typeof sessionData === 'string') {
+        sessionData = { uid: sessionData, authUid: null };
+        res.cookie('__session', sessionData, { signed: true, httpOnly: true });
+    }
+
+    if (!sessionData || !sessionData.uid) {
         return res.redirect('/login');
     }
+    
+    const uid = sessionData.uid;
+    const authUid = sessionData.authUid || null;
     
     try {
         const userDoc = await db.collection('users').doc(uid).get();
@@ -56,6 +67,12 @@ app.get('/', async (req, res) => {
         }
         
         let info = userDoc.data().info || {};
+        
+        // Authorization check for locked data
+        if (info.Lock && info.Lock !== authUid) {
+            return res.render('auth_prompt', { method: 'reauth', uid: uid, logs: null, flash: '您的授權已過期或資料已上鎖，請重新驗證' });
+        }
+        
         let nickname = info.nickName || uid;
         
         const logsDoc = await db.collection('users').doc(uid).collection('data').doc('logs').get();
@@ -72,7 +89,8 @@ app.get('/', async (req, res) => {
             logs: analyzed.logs,
             stats: analyzed,
             nickname: nickname,
-            uid: uid
+            uid: uid,
+            isLocked: !!info.Lock
         });
     } catch (e) {
         console.error(e);
@@ -102,7 +120,20 @@ app.post('/login', async (req, res) => {
             let logs = await fetchAllLogsSlowly(uid, roleToken, userCookie);
             console.log(`Fetched ${logs.length} logs`);
             
-            const logsDocRef = db.collection('users').doc(uid).collection('data').doc('logs');
+            const userDocRef = db.collection('users').doc(uid);
+            const userDoc = await userDocRef.get();
+            let authUid = null;
+            
+            if (userDoc.exists) {
+                const existingInfo = userDoc.data().info || {};
+                authUid = existingInfo.Lock || null;
+                infoData.ts = existingInfo.ts || Math.floor(Date.now() / 1000);
+                if (existingInfo.Lock) infoData.Lock = existingInfo.Lock;
+            } else {
+                infoData.ts = Math.floor(Date.now() / 1000);
+            }
+            
+            const logsDocRef = userDocRef.collection('data').doc('logs');
             const logsDoc = await logsDocRef.get();
             if (logsDoc.exists) {
                 const data = logsDoc.data();
@@ -111,19 +142,23 @@ app.post('/login', async (req, res) => {
             }
             
             // Save to Firestore
-            await db.collection('users').doc(uid).set({ info: infoData }, { merge: true });
+            await userDocRef.set({ info: infoData }, { merge: true });
             
             // For large logs, they shouldn't exceed 1MB in a single document representing roughly 10k pulls.
             // Using JSON.stringify bypasses Firestore's massive per-object array overhead.
             await logsDocRef.set({ jsonString: JSON.stringify(logs) });
             
-            res.cookie('__session', uid, { signed: true, httpOnly: true });
+            res.cookie('__session', { uid: uid, authUid: authUid }, { signed: true, httpOnly: true });
             return res.redirect('/');
         } else if (method === 'existing') {
             const uid = req.body.uid;
             const userDoc = await db.collection('users').doc(uid).get();
             if (userDoc.exists) {
-                res.cookie('__session', uid, { signed: true, httpOnly: true });
+                const info = userDoc.data().info || {};
+                if (info.Lock) {
+                    return res.render('auth_prompt', { method: 'existing', uid: uid, logs: null, flash: null });
+                }
+                res.cookie('__session', { uid: uid, authUid: null }, { signed: true, httpOnly: true });
                 return res.redirect('/');
             } else {
                 return res.render('login', { flash: '找不到該 ID 的紀錄' });
@@ -135,11 +170,22 @@ app.post('/login', async (req, res) => {
                 return res.status(400).send('請提供有效的 ID');
             }
             if (logs && Array.isArray(logs)) {
-                const logsDocRef = db.collection('users').doc(uid).collection('data').doc('logs');
-                await db.collection('users').doc(uid).set({ info: { uid: uid, nickName: uid } }, { merge: true });
+                const userDocRef = db.collection('users').doc(uid);
+                const userDoc = await userDocRef.get();
+                
+                if (userDoc.exists) {
+                    const info = userDoc.data().info || {};
+                    if (info.Lock) {
+                        return res.render('auth_prompt', { method: 'upload', uid: uid, logs: logs, flash: null });
+                    }
+                } else {
+                    await userDocRef.set({ info: { uid: uid, nickName: uid, ts: Math.floor(Date.now() / 1000) } }, { merge: true });
+                }
+                
+                const logsDocRef = userDocRef.collection('data').doc('logs');
                 await logsDocRef.set({ jsonString: JSON.stringify(logs) });
                 
-                res.cookie('__session', uid, { signed: true, httpOnly: true });
+                res.cookie('__session', { uid: uid, authUid: null }, { signed: true, httpOnly: true });
                 return res.redirect('/');
             } else {
                 return res.status(400).send('請提供 ID 與檔案格式錯誤');
@@ -152,11 +198,28 @@ app.post('/login', async (req, res) => {
 });
 
 app.get('/export', async (req, res) => {
-    const uid = req.signedCookies.__session;
-    if (!uid) {
+    let sessionData = req.signedCookies.__session;
+    if (typeof sessionData === 'string') {
+        sessionData = { uid: sessionData, authUid: null };
+        res.cookie('__session', sessionData, { signed: true, httpOnly: true });
+    }
+    if (!sessionData || !sessionData.uid) {
         return res.redirect('/login');
     }
+    const uid = sessionData.uid;
+    const authUid = sessionData.authUid || null;
+    
     try {
+        const userDoc = await db.collection('users').doc(uid).get();
+        if (!userDoc.exists) {
+            return res.status(404).send('No logs found.');
+        }
+        
+        const info = userDoc.data().info || {};
+        if (info.Lock && info.Lock !== authUid) {
+            return res.status(401).send('Unauthorized. Data is locked.');
+        }
+
         const logsDoc = await db.collection('users').doc(uid).collection('data').doc('logs').get();
         if (!logsDoc.exists) {
             return res.status(404).send('No logs found.');
@@ -175,6 +238,80 @@ app.get('/export', async (req, res) => {
 app.get('/logout', (req, res) => {
     res.clearCookie('__session');
     res.redirect('/login');
+});
+
+// Post handler for Firebase Auth token verification
+app.post('/login_locked', async (req, res) => {
+    const { idToken, uid, method, logs } = req.body;
+    try {
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        const authUid = decodedToken.uid;
+        
+        const userDocRef = db.collection('users').doc(uid);
+        const userDoc = await userDocRef.get();
+        if (!userDoc.exists) return res.status(404).json({ success: false, error: 'User not found' });
+        
+        const info = userDoc.data().info || {};
+        if (info.Lock !== authUid) {
+            return res.status(403).json({ success: false, error: '帳號授權不符，無法解鎖資料' });
+        }
+        
+        if (method === 'upload' && logs) {
+            const logsDocRef = userDocRef.collection('data').doc('logs');
+            await logsDocRef.set({ jsonString: JSON.stringify(logs) });
+        }
+        
+        res.cookie('__session', { uid: uid, authUid: authUid }, { signed: true, httpOnly: true });
+        return res.json({ success: true, redirect: '/' });
+    } catch (e) {
+        console.error(e);
+        return res.status(401).json({ success: false, error: '驗證失敗' });
+    }
+});
+
+// API endpoint for toggling the lock
+app.post('/api/toggleLock', async (req, res) => {
+    let sessionData = req.signedCookies.__session;
+    if (typeof sessionData === 'string') {
+        sessionData = { uid: sessionData, authUid: null };
+        res.cookie('__session', sessionData, { signed: true, httpOnly: true });
+    }
+    if (!sessionData || !sessionData.uid) {
+        return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+    const uid = sessionData.uid;
+    
+    const { idToken, action } = req.body;
+    try {
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        const tokenUid = decodedToken.uid;
+        
+        const userDocRef = db.collection('users').doc(uid);
+        const userDoc = await userDocRef.get();
+        if (!userDoc.exists) return res.status(404).json({ success: false, error: 'User not found' });
+        
+        const info = userDoc.data().info || {};
+        
+        if (action === 'lock') {
+            if (info.Lock) {
+                return res.status(400).json({ success: false, error: 'Already locked' });
+            }
+            await userDocRef.set({ info: { Lock: tokenUid } }, { merge: true });
+            res.cookie('__session', { uid: uid, authUid: tokenUid }, { signed: true, httpOnly: true });
+            return res.json({ success: true });
+        } else if (action === 'unlock') {
+            if (info.Lock !== tokenUid) {
+                return res.status(403).json({ success: false, error: 'Token UID does not match Lock UID' });
+            }
+            const { FieldValue } = require('firebase-admin/firestore');
+            await userDocRef.update({ 'info.Lock': FieldValue.delete() });
+            res.cookie('__session', { uid: uid, authUid: null }, { signed: true, httpOnly: true });
+            return res.json({ success: true });
+        }
+    } catch (e) {
+        console.error(e);
+        return res.status(500).json({ success: false, error: 'Internal error: ' + (e.message || e.toString()) });
+    }
 });
 
 // Export the Express app as a Firebase Function (HTTP), set region to Taiwan and restrict maxInstances for cost control
